@@ -2,8 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 
 # 1. 페이지 설정
 st.set_page_config(
@@ -49,17 +51,26 @@ feature_map = {
     '롱런 지수': 'long_run_index'
 }
 
+# 기호 데이터 (2~7개 대응)
+CLUSTER_SYMBOLS = ['㉮', '㉯', '㉰', '㉱', '㉲', '㉳', '㉴']
+
 # 4. 전체 편수 및 묶은 편수 한 줄 표시
 st.write(f"**전체 영화 편수:** {len(df_raw):,}편 | **분석에 사용된 영화 편수:** {len(df):,}편")
 st.markdown("---")
 
-# 5. 군집화에 사용할 속성 선택 (다중 선택, 기본 4개)
-st.subheader("1. 군집화 속성 선택")
-selected_feature_names = st.multiselect(
-    "군집화에 사용할 속성을 선택하세요 (최소 2개 이상):",
-    options=list(feature_map.keys()),
-    default=list(feature_map.keys())
-)
+# 5. 군집화에 사용할 속성 및 묶음 수 선택
+st.subheader("1. 군집화 설정")
+col_feat, col_k = st.columns([2, 1])
+
+with col_feat:
+    selected_feature_names = st.multiselect(
+        "군집화에 사용할 속성을 선택하세요 (최소 2개 이상):",
+        options=list(feature_map.keys()),
+        default=list(feature_map.keys())
+    )
+
+with col_k:
+    n_clusters = st.slider("묶음 수 (k) 선택:", min_value=2, max_value=7, value=3)
 
 if len(selected_feature_names) < 2:
     st.warning("군집화를 위해 속성을 최소 2개 이상 선택해 주세요.")
@@ -67,20 +78,22 @@ if len(selected_feature_names) < 2:
 
 selected_features = [feature_map[name] for name in selected_feature_names]
 
-# 6. StandardScaler + KMeans (n_clusters=3, random_state=42)
+# 6. StandardScaler + KMeans
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(df[selected_features])
 
-kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
 raw_clusters = kmeans.fit_predict(X_scaled)
 df['raw_cluster'] = raw_clusters
 
-# 7. 누적 관객(total_audi) 평균이 큰 순서대로 ㉮, ㉯, ㉰ 부여
+# 7. 누적 관객(total_audi) 평균이 큰 순서대로 ㉮~㉴ 부여
 cluster_audi_mean = df.groupby('raw_cluster')['total_audi'].mean().sort_values(ascending=False)
-label_map = {old_cluster: new_label for old_cluster, new_label in zip(cluster_audi_mean.index, ['㉮', '㉯', '㉰'])}
+current_symbols = CLUSTER_SYMBOLS[:n_clusters]
+
+label_map = {old_cluster: new_label for old_cluster, new_label in zip(cluster_audi_mean.index, current_symbols)}
 df['cluster'] = df['raw_cluster'].map(label_map)
 
-category_orders = {'cluster': ['㉮', '㉯', '㉰']}
+category_orders = {'cluster': current_symbols}
 
 st.markdown("---")
 st.subheader("2. 산점도 시각화")
@@ -152,7 +165,7 @@ summary_df = df.groupby('cluster').agg(
     audi_mean=('orig_total_audi', 'mean'),
     top10_mean=('orig_days_in_top10', 'mean'),
     longrun_mean=('orig_long_run_index', 'mean')
-).reindex(['㉮', '㉯', '㉰'])
+).reindex(current_symbols)
 
 summary_df.columns = ['영화 편수', '스크린 수 평균', '누적 관객 수 평균', '10위권 일수 평균', '롱런 지수 평균']
 
@@ -168,13 +181,4 @@ st.dataframe(formatted_summary, use_container_width=True)
 st.markdown("---")
 
 # 11. 묶음마다 누적 관객이 많은 순서로 상위 5개 영화 제목 표시
-st.subheader("4. 묶음별 누적 관객 수 상위 5개 영화")
-
-cols = st.columns(3)
-for idx, cluster_label in enumerate(['㉮', '㉯', '㉰']):
-    with cols[idx]:
-        st.markdown(f"### 묶음 {cluster_label}")
-        top5_movies = df[df['cluster'] == cluster_label].sort_values(by='total_audi', ascending=False).head(5)
-        
-        for rank, (_, row) in enumerate(top5_movies.iterrows(), start=1):
-            st.write(f"**{rank}. {row['movieNm']}** ({row['total_audi']:,}명)")
+st.subheader("4. 묶음별 누적 관
